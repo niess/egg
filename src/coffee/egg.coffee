@@ -42,6 +42,8 @@ class Renderer
 
         shaderProgram.location =
             vertex: gl.getAttribLocation shaderProgram, "vertex"
+            projection: gl.getUniformLocation shaderProgram, "projection"
+            view: gl.getUniformLocation shaderProgram, "view"
 
         gl.clearColor 0.5, 0.5, 0.5, 0.9
         gl.enable gl.DEPTH_TEST
@@ -59,8 +61,8 @@ class Renderer
 
 
 class Camera
-    constructor: (renderer, kwargs) ->
-        canvas = renderer.canvas
+    constructor: (@renderer, kwargs) ->
+        canvas = @renderer.canvas
         if kwargs?
             {fov, aspect, near, far, position, rotation} = kwargs
         fov ?= 45 * Math.PI / 180
@@ -75,21 +77,24 @@ class Camera
         if position?
             @translate position...
 
-        # Set the uniforms for the shader
-        [gl, shaderProgram] = [renderer.gl, renderer.shaderProgram]
+        do @update
+
+
+    update: =>
+        [gl, shaderProgram] = [@renderer.gl, @renderer.shaderProgram]
         gl.uniformMatrix4fv(
-            gl.getUniformLocation(shaderProgram, "projection")
+            shaderProgram.location.projection
             false
             @projection
         )
         gl.uniformMatrix4fv(
-            gl.getUniformLocation(shaderProgram, "view")
+            shaderProgram.location.view
             false
             @view
         )
 
     translate: (x, y, z) ->
-        glMatrix.mat4.translate @view, @view, [-x, -y, -z]
+        glMatrix.mat4.translate @view, @view, [x, y, z]
 
 
 class Geometry
@@ -119,6 +124,70 @@ class Geometry
         @size = indices.length
 
 
+class Application
+    constructor: (@renderer, @geometry, @camera) ->
+        @walkspeed = 1.0
+
+        scope = this
+        @_keyMap =
+            KeyA: (state) -> scope._moveLeft = state
+            KeyW: (state) -> scope._moveForward = state
+            KeyD: (state) -> scope._moveRight = state
+            KeyS: (state) -> scope._moveBackward = state
+            KeyQ: (state) -> scope._moveDown = state
+            KeyE: (state) -> scope._moveUp = state
+            KeyX: (state) -> scope._toggleView = state
+
+        window.addEventListener("keydown", @keyDown, false)
+        window.addEventListener("keyup", @keyUp, false)
+
+    run: =>
+        t0 = 0
+        animate = (time) =>
+            delta = (time - t0) * 1e-03 * @walkspeed
+            t0 = time
+
+            if @_moveLeft and !@_moveRight
+                dX = -1
+            else if @_moveRight and !@_moveLeft
+                dX = 1
+            else
+                dX = 0
+            if @_moveForward and !@_moveBackward
+                dZ = 1
+            else if @_moveBackward and !@_moveForward
+                dZ = -1
+            else
+                dZ = 0
+            if @_moveUp and !@_moveDown
+                dY = 1
+            else if @_moveDown and !@_moveUp
+                dY = -1
+            else
+                dY = 0
+
+            if (dX != 0) or (dY != 0) or (dZ != 0)
+                @camera.translate delta * dX, delta * dY, delta * dZ
+                do @camera.update
+                @renderer.update @geometry
+
+            window.requestAnimationFrame animate
+
+        @renderer.update @geometry
+        animate(0)
+
+
+    keyDown: (event) =>
+        action = @_keyMap[event.code]
+        if action?
+            action(true)
+
+
+    keyUp: (event) =>
+        action = @_keyMap[event.code]
+        action(false) if action?
+
+
 main = ->
     r = new Renderer "#glCanvas", "egg-vs", "egg-fs"
     [canvas, gl, shaderProgram] = [r.canvas, r.gl, r.shaderProgram]
@@ -128,9 +197,10 @@ main = ->
     indices = [0, 1, 2, 2, 3, 0]
     geometry = new Geometry r, vertices, indices
     camera = new Camera r,
-        position: [0.0, 0.0, 8.0]
+        position: [0.0, 0.0, -8.0]
 
-    r.update geometry
+    app = new Application r, geometry, camera
+    do app.run
 
 
 do main
